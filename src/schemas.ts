@@ -41,8 +41,34 @@ const ReactionSchema = z
   })
   .strip();
 
+// Legacy message attachments. Integrations such as Datadog post with an empty
+// `text` and put the title, link and body here.
+const AttachmentSchema = z
+  .object({
+    color: z.string().optional(),
+    fallback: z.string().optional(),
+    fields: z
+      .array(
+        z
+          .object({
+            title: z.string().optional(),
+            value: z.string().optional(),
+            short: z.boolean().optional(),
+          })
+          .strip()
+      )
+      .optional(),
+    footer: z.string().optional(),
+    pretext: z.string().optional(),
+    text: z.string().optional(),
+    title: z.string().optional(),
+    title_link: z.string().optional(),
+  })
+  .strip();
+
 const ConversationsHistoryMessageSchema = z
   .object({
+    attachments: z.array(AttachmentSchema).optional(),
     reactions: z.array(ReactionSchema).optional(),
     reply_count: z.number().optional(),
     reply_users: z.array(z.string()).optional(),
@@ -80,6 +106,7 @@ const ProfileSchema = z
 
 const SearchMessageSchema = z
   .object({
+    attachments: z.array(AttachmentSchema).optional(),
     channel: z
       .object({
         id: z.string().optional(),
@@ -97,21 +124,6 @@ const SearchMessageSchema = z
 //
 // Request schemas
 //
-
-export const AddReactionRequestSchema = z.object({
-  channel_id: z
-    .string()
-    .describe('The ID of the channel containing the message'),
-  reaction: z.string().describe('The name of the emoji reaction (without ::)'),
-  timestamp: z
-    .string()
-    .regex(/^\d{10}\.\d{6}$/, {
-      message: "Timestamp must be in the format '1234567890.123456'",
-    })
-    .describe(
-      "The timestamp of the message to react to in the format '1234567890.123456'"
-    ),
-});
 
 export const GetChannelHistoryRequestSchema = z.object({
   channel_id: z
@@ -194,26 +206,6 @@ export const ListChannelsRequestSchema = z.object({
     .optional()
     .default(100)
     .describe('Maximum number of channels to return (default 100)'),
-});
-
-export const PostMessageRequestSchema = z.object({
-  channel_id: z.string().describe('The ID of the channel to post to'),
-  text: z.string().describe('The message text to post'),
-});
-
-export const ReplyToThreadRequestSchema = z.object({
-  channel_id: z
-    .string()
-    .describe('The ID of the channel containing the thread'),
-  text: z.string().describe('The reply text'),
-  thread_ts: z
-    .string()
-    .regex(/^\d{10}\.\d{6}$/, {
-      message: "Timestamp must be in the format '1234567890.123456'",
-    })
-    .describe(
-      "The timestamp of the parent message in the format '1234567890.123456'. Timestamps in the format without the period can be converted by adding the period such that 6 numbers come after it."
-    ),
 });
 
 export const SearchChannelsRequestSchema = z.object({

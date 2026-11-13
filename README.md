@@ -2,6 +2,13 @@
 
 A [MCP(Model Context Protocol)](https://www.anthropic.com/news/model-context-protocol) server for accessing Slack API. This server allows AI assistants to interact with the Slack API through a standardized interface.
 
+This fork (goooods-com) is read-only and public-channel-only:
+
+- Every API call uses `SLACK_USER_TOKEN`; no bot token is needed.
+- There are no tools that post messages or add reactions.
+- `slack_get_channel_history` / `slack_get_thread_replies` refuse channels that `conversations.info` does not report as public, and `slack_search_messages` always drops matches from private channels, DMs and group DMs.
+- Messages include `attachments` (title, title_link, text, fallback, pretext, fields, color, footer), so integration posts such as Datadog alerts with an empty `text` are readable.
+
 ## Transport Support
 
 This server supports both traditional and modern MCP transport methods:
@@ -14,9 +21,6 @@ This server supports both traditional and modern MCP transport methods:
 Available tools:
 
 - `slack_list_channels` - List public channels in the workspace with pagination
-- `slack_post_message` - Post a new message to a Slack channel
-- `slack_reply_to_thread` - Reply to a specific message thread in Slack
-- `slack_add_reaction` - Add a reaction emoji to a message
 - `slack_get_channel_history` - Get recent messages from a channel
 - `slack_get_thread_replies` - Get all replies in a message thread
 - `slack_get_users` - Retrieve basic profile information of all users in the workspace
@@ -43,16 +47,12 @@ NOTE: Its now hosted in GitHub Registry so you need your PAT.
 
 You need to set the following environment variables:
 
-- `SLACK_BOT_TOKEN`: Slack Bot User OAuth Token
-- `SLACK_USER_TOKEN`: Slack User OAuth Token (required for some features like message search)
-- `SLACK_SAFE_SEARCH` (optional): When set to `true`, automatically excludes private channels, DMs, and group DMs from search results. This is enforced server-side and cannot be overridden by clients.
+- `SLACK_USER_TOKEN`: Slack User OAuth Token. Scopes: `channels:read`, `channels:history`, `search:read`, `users:read` (and `users.profile:read` for `slack_get_user_profiles`)
 
 You can also create a `.env` file to set these environment variables:
 
 ```
-SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_USER_TOKEN=xoxp-your-user-token
-SLACK_SAFE_SEARCH=true  # Optional: Enable safe search mode
 ```
 
 ### Usage
@@ -96,9 +96,7 @@ node node_modules/.bin/slack-mcp-server -port 3000
     ],
     "env": {
       "NPM_CONFIG_//npm.pkg.github.com/:_authToken": "<your-github-pat>",
-      "SLACK_BOT_TOKEN": "<your-bot-token>",
-      "SLACK_USER_TOKEN": "<your-user-token>",
-      "SLACK_SAFE_SEARCH": "true"
+      "SLACK_USER_TOKEN": "<your-user-token>"
     }
   }
 }
@@ -108,7 +106,7 @@ node node_modules/.bin/slack-mcp-server -port 3000
 
 Start the server:
 ```bash
-SLACK_BOT_TOKEN=<your-bot-token> SLACK_USER_TOKEN=<your-user-token> npx @ubie-oss/slack-mcp-server -port 3000
+SLACK_USER_TOKEN=<your-user-token> npx @ubie-oss/slack-mcp-server -port 3000
 ```
 
 Connect to: `http://localhost:3000/mcp`

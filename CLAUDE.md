@@ -45,10 +45,12 @@ The server follows a schema-driven design pattern:
 ### Available Tools
 All tools follow the pattern: validate request → call Slack API → parse response → return JSON
 
-- Channel operations: list, post message, get history
-- Thread operations: reply, get replies  
+All tools are read-only and limited to public channels (see README).
+
+- Channel operations: list, get history
+- Thread operations: get replies
 - User operations: get users, profiles, bulk profiles
-- Message operations: search, add reactions
+- Message operations: search
 
 ### Tool Selection Guidelines
 
@@ -65,8 +67,7 @@ All tools follow the pattern: validate request → call Slack API → parse resp
 
 ### Environment Requirements
 Must set in environment or `.env` file:
-- `SLACK_BOT_TOKEN`: Bot User OAuth Token
-- `SLACK_USER_TOKEN`: User OAuth Token (for search)
+- `SLACK_USER_TOKEN`: User OAuth Token (used for every API call)
 
 ## Key Implementation Notes
 

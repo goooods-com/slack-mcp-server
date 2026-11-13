@@ -14,9 +14,6 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import {
   ListChannelsRequestSchema,
-  PostMessageRequestSchema,
-  ReplyToThreadRequestSchema,
-  AddReactionRequestSchema,
   GetChannelHistoryRequestSchema,
   GetThreadRepliesRequestSchema,
   GetUsersRequestSchema,
@@ -35,13 +32,6 @@ import {
 
 dotenv.config();
 
-if (!process.env.SLACK_BOT_TOKEN) {
-  console.error(
-    'SLACK_BOT_TOKEN is not set. Please set it in your environment or .env file.'
-  );
-  process.exit(1);
-}
-
 if (!process.env.SLACK_USER_TOKEN) {
   console.error(
     'SLACK_USER_TOKEN is not set. Please set it in your environment or .env file.'
@@ -49,15 +39,39 @@ if (!process.env.SLACK_USER_TOKEN) {
   process.exit(1);
 }
 
-const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-const userClient = new WebClient(process.env.SLACK_USER_TOKEN);
+// All tools are read-only and run with this single user token. What the token's
+// owner can see in private channels and DMs is never returned: history/replies
+// reject non-public conversations and search drops their matches.
+const slackClient = new WebClient(process.env.SLACK_USER_TOKEN);
 
-// Safe search mode to exclude private channels and DMs
-const safeSearchMode = process.env.SLACK_SAFE_SEARCH === 'true';
-if (safeSearchMode) {
-  console.error(
-    'Safe search mode enabled: Private channels and DMs will be excluded from search results'
+type ConversationFlags = {
+  is_private?: boolean;
+  is_im?: boolean;
+  is_mpim?: boolean;
+  is_group?: boolean;
+};
+
+function isPublicChannel(channel: ConversationFlags | undefined): boolean {
+  return (
+    channel !== undefined &&
+    channel.is_private === false &&
+    !channel.is_im &&
+    !channel.is_mpim &&
+    !channel.is_group
   );
+}
+
+// Throws unless channelId is a public channel. Lookup failures are treated as
+// non-public so that a missing scope never lets a private conversation through.
+async function assertPublicChannel(channelId: string): Promise<void> {
+  const info = await slackClient.conversations
+    .info({ channel: channelId })
+    .catch(() => undefined);
+  if (!info?.ok || !isPublicChannel(info.channel)) {
+    throw new Error(
+      `Channel ${channelId} is not a public channel or could not be verified as one. Only public channels can be read.`
+    );
+  }
 }
 
 // Parse command line arguments
@@ -117,21 +131,6 @@ function createServer(): Server {
           name: 'slack_list_channels',
           description: 'List public channels in the workspace with pagination',
           inputSchema: zodToJsonSchema(ListChannelsRequestSchema),
-        },
-        {
-          name: 'slack_post_message',
-          description: 'Post a new message to a Slack channel',
-          inputSchema: zodToJsonSchema(PostMessageRequestSchema),
-        },
-        {
-          name: 'slack_reply_to_thread',
-          description: 'Reply to a specific message thread in Slack',
-          inputSchema: zodToJsonSchema(ReplyToThreadRequestSchema),
-        },
-        {
-          name: 'slack_add_reaction',
-          description: 'Add a reaction emoji to a message',
-          inputSchema: zodToJsonSchema(AddReactionRequestSchema),
         },
         {
           name: 'slack_get_channel_history',
@@ -202,57 +201,11 @@ function createServer(): Server {
           };
         }
 
-        case 'slack_post_message': {
-          const args = PostMessageRequestSchema.parse(request.params.arguments);
-          const response = await slackClient.chat.postMessage({
-            channel: args.channel_id,
-            text: args.text,
-          });
-          if (!response.ok) {
-            throw new Error(`Failed to post message: ${response.error}`);
-          }
-          return {
-            content: [{ type: 'text', text: 'Message posted successfully' }],
-          };
-        }
-
-        case 'slack_reply_to_thread': {
-          const args = ReplyToThreadRequestSchema.parse(
-            request.params.arguments
-          );
-          const response = await slackClient.chat.postMessage({
-            channel: args.channel_id,
-            thread_ts: args.thread_ts,
-            text: args.text,
-          });
-          if (!response.ok) {
-            throw new Error(`Failed to reply to thread: ${response.error}`);
-          }
-          return {
-            content: [
-              { type: 'text', text: 'Reply sent to thread successfully' },
-            ],
-          };
-        }
-        case 'slack_add_reaction': {
-          const args = AddReactionRequestSchema.parse(request.params.arguments);
-          const response = await slackClient.reactions.add({
-            channel: args.channel_id,
-            timestamp: args.timestamp,
-            name: args.reaction,
-          });
-          if (!response.ok) {
-            throw new Error(`Failed to add reaction: ${response.error}`);
-          }
-          return {
-            content: [{ type: 'text', text: 'Reaction added successfully' }],
-          };
-        }
-
         case 'slack_get_channel_history': {
           const args = GetChannelHistoryRequestSchema.parse(
             request.params.arguments
           );
+          await assertPublicChannel(args.channel_id);
           const response = await slackClient.conversations.history({
             channel: args.channel_id,
             limit: args.limit,
@@ -272,6 +225,7 @@ function createServer(): Server {
           const args = GetThreadRepliesRequestSchema.parse(
             request.params.arguments
           );
+          await assertPublicChannel(args.channel_id);
           const response = await slackClient.conversations.replies({
             channel: args.channel_id,
             ts: args.thread_ts,
@@ -387,7 +341,7 @@ function createServer(): Server {
           query = query.trim();
           console.log('Search query:', query);
 
-          const response = await userClient.search.messages({
+          const response = await slackClient.search.messages({
             query: query,
             highlight: parsedParams.highlight,
             sort: parsedParams.sort,
@@ -400,36 +354,13 @@ function createServer(): Server {
             throw new Error(`Failed to search messages: ${response.error}`);
           }
 
-          // Apply safe search filtering if enabled (before parsing)
-          if (safeSearchMode && response.messages?.matches) {
-            const originalCount = response.messages.matches.length;
+          // Drop matches outside public channels before parsing, because the
+          // parsed schema no longer carries the channel flags.
+          if (response.messages?.matches) {
             response.messages.matches = response.messages.matches.filter(
-              (msg: {
-                channel?: {
-                  is_private?: boolean;
-                  is_im?: boolean;
-                  is_mpim?: boolean;
-                };
-              }) => {
-                // Exclude private channels, DMs, and multi-party DMs
-                const channel = msg.channel;
-                if (!channel) return true; // Keep if no channel info
-
-                return !(
-                  channel.is_private ||
-                  channel.is_im ||
-                  channel.is_mpim
-                );
-              }
+              (msg: { channel?: ConversationFlags }) =>
+                isPublicChannel(msg.channel)
             );
-
-            const filteredCount =
-              originalCount - response.messages.matches.length;
-            if (filteredCount > 0) {
-              console.error(
-                `Safe search: Filtered out ${filteredCount} messages from private channels/DMs`
-              );
-            }
           }
 
           const parsed = SearchMessagesResponseSchema.parse(response);
